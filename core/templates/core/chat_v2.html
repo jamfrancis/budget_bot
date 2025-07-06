@@ -1,0 +1,574 @@
+{% extends 'base.html' %}
+
+{% block title %}bal.ai - AI Financial Assistant{% endblock %}
+
+{% block content %}
+<div class="flex h-screen bg-gray-100">
+    <!-- conversation sidebar -->
+    <div class="w-80 bg-white border-r border-gray-300 flex flex-col">
+        <!-- sidebar header -->
+        <div class="p-4 border-b border-gray-200">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900">Conversations</h2>
+                <button id="new-chat-btn" class="bg-primary text-white px-3 py-1 rounded text-sm hover:bg-secondary transition-colors">
+                    New Chat
+                </button>
+            </div>
+        </div>
+        
+        <!-- conversation list -->
+        <div class="flex-1 overflow-y-auto">
+            <div id="conversation-list" class="p-2 space-y-1">
+                <!-- conversations will be loaded here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- main chat area -->
+    <div class="flex-1 flex flex-col">
+        <!-- chat header -->
+        <div class="bg-white border-b border-gray-200 p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-semibold text-gray-900" id="chat-title">Financial Assistant</h1>
+                    <p class="text-sm text-gray-600">Ask me anything about your finances</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <span id="connection-status" class="text-sm text-gray-500">●</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- messages area -->
+        <div class="flex-1 overflow-y-auto p-4 space-y-4" id="messages-container">
+            <!-- welcome message when no conversation selected -->
+            <div id="welcome-message" class="text-center py-8">
+                <h2 class="text-xl font-semibold text-gray-900 mb-2">Welcome to your Financial Assistant</h2>
+                <p class="text-gray-600 mb-4">Start a new conversation or select an existing one to continue chatting.</p>
+                
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left max-w-md mx-auto">
+                    <p class="font-medium text-blue-900 mb-2">Try these example questions:</p>
+                    <ul class="text-sm space-y-2">
+                        <li><button class="example-question text-left text-blue-800 hover:text-blue-900 hover:bg-blue-100 px-2 py-1 rounded transition-colors w-full" data-question="Can I afford a $500 vacation?">"Can I afford a $500 vacation?"</button></li>
+                        <li><button class="example-question text-left text-blue-800 hover:text-blue-900 hover:bg-blue-100 px-2 py-1 rounded transition-colors w-full" data-question="How much should I save monthly?">"How much should I save monthly?"</button></li>
+                        <li><button class="example-question text-left text-blue-800 hover:text-blue-900 hover:bg-blue-100 px-2 py-1 rounded transition-colors w-full" data-question="What's my current spending pattern?">"What's my current spending pattern?"</button></li>
+                        <li><button class="example-question text-left text-blue-800 hover:text-blue-900 hover:bg-blue-100 px-2 py-1 rounded transition-colors w-full" data-question="Should I pay off debt or save more?">"Should I pay off debt or save more?"</button></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- message input -->
+        <div class="bg-white border-t border-gray-200 p-4">
+            {% csrf_token %}
+            <form id="message-form" class="flex space-x-4">
+                <div class="flex-1">
+                    <input 
+                        type="text" 
+                        id="message-input" 
+                        placeholder="Type your message..." 
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                        disabled
+                    >
+                </div>
+                <button 
+                    type="submit" 
+                    id="send-btn"
+                    class="bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled
+                >
+                    Send
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+class ChatApp {
+    constructor() {
+        this.currentConversationId = null;
+        this.websocket = null;
+        this.conversations = [];
+        
+        this.init();
+    }
+    
+    init() {
+        this.loadConversations();
+        this.bindEvents();
+    }
+    
+    bindEvents() {
+        // new chat button
+        document.getElementById('new-chat-btn').addEventListener('click', () => {
+            this.createNewConversation();
+        });
+        
+        // message form
+        document.getElementById('message-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.sendMessage();
+        });
+        
+        // enter key to send message
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+        
+        // example question clicks
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('example-question')) {
+                const question = e.target.dataset.question;
+                this.askExampleQuestion(question);
+            }
+        });
+    }
+    
+    async askExampleQuestion(question) {
+        try {
+            console.log('Asking example question:', question);
+            
+            // create new conversation first
+            const conversation = await this.createNewConversationInternal();
+            if (!conversation) {
+                console.error('Failed to create conversation for example question');
+                return;
+            }
+            
+            // select the conversation (this will connect websocket)
+            await this.selectConversation(conversation.id);
+            
+            // wait for websocket to be ready with timeout
+            const maxWait = 3000; // 3 seconds
+            const startTime = Date.now();
+            
+            while ((!this.websocket || this.websocket.readyState !== WebSocket.OPEN) && 
+                   (Date.now() - startTime < maxWait)) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            // send the question automatically
+            if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                console.log('WebSocket ready, sending example question');
+                
+                // immediately show user message in UI
+                this.addMessage({
+                    role: 'user',
+                    message: question
+                });
+                
+                // show loading indicator
+                this.showLoadingIndicator();
+                
+                this.websocket.send(JSON.stringify({
+                    message: question
+                }));
+            } else {
+                console.error('WebSocket not ready for example question after waiting');
+                console.log('WebSocket state:', this.websocket ? this.websocket.readyState : 'null');
+            }
+            
+        } catch (error) {
+            console.error('Failed to ask example question:', error);
+        }
+    }
+    
+    async createNewConversationInternal() {
+        try {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (csrfToken) {
+                headers['X-CSRFToken'] = csrfToken.value;
+            }
+            
+            const response = await fetch('/api/conversations/', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({
+                    title: `Chat ${new Date().toLocaleDateString()}`
+                })
+            });
+            
+            if (!response.ok) {
+                console.error('HTTP error:', response.status, response.statusText);
+                return null;
+            }
+            
+            const conversation = await response.json();
+            this.conversations.unshift(conversation);
+            this.renderConversationList();
+            return conversation;
+        } catch (error) {
+            console.error('Failed to create conversation:', error);
+            return null;
+        }
+    }
+    
+    async loadConversations() {
+        try {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+            const headers = {};
+            if (csrfToken) {
+                headers['X-CSRFToken'] = csrfToken.value;
+            }
+            
+            const response = await fetch('/api/conversations/', { headers });
+            
+            if (!response.ok) {
+                console.error('HTTP error:', response.status, response.statusText);
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            this.conversations = data.results || data;
+            this.renderConversationList();
+        } catch (error) {
+            console.error('Failed to load conversations:', error);
+            // Show empty state if can't load
+            this.conversations = [];
+            this.renderConversationList();
+        }
+    }
+    
+    renderConversationList() {
+        const container = document.getElementById('conversation-list');
+        
+        if (this.conversations.length === 0) {
+            container.innerHTML = '<p class="text-gray-500 text-sm p-2">No conversations yet</p>';
+            return;
+        }
+        
+        container.innerHTML = this.conversations.map(conv => `
+            <div class="conversation-item group relative p-3 rounded cursor-pointer hover:bg-gray-50 ${conv.id === this.currentConversationId ? 'bg-blue-50 border-l-4 border-primary' : ''}"
+                 data-conversation-id="${conv.id}">
+                <div class="conversation-content">
+                    <h4 class="font-medium text-gray-900 truncate pr-8">${conv.title}</h4>
+                    <p class="text-sm text-gray-600 truncate">${conv.last_message ? conv.last_message.content : 'No messages'}</p>
+                    <p class="text-xs text-gray-400">${this.formatDate(conv.updated_at)}</p>
+                </div>
+                
+                <!-- 3-dot menu button -->
+                <div class="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button class="menu-btn p-1 rounded hover:bg-gray-200" data-conversation-id="${conv.id}">
+                        <svg class="w-4 h-4 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path>
+                        </svg>
+                    </button>
+                    
+                    <!-- dropdown menu -->
+                    <div class="menu-dropdown absolute right-0 top-8 hidden bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-24">
+                        <button class="delete-btn w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg" 
+                                data-conversation-id="${conv.id}">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+        
+        // bind click events for conversation items
+        container.querySelectorAll('.conversation-content').forEach(content => {
+            content.addEventListener('click', () => {
+                const conversationId = content.closest('.conversation-item').dataset.conversationId;
+                this.selectConversation(conversationId);
+            });
+        });
+        
+        // bind menu button events
+        container.querySelectorAll('.menu-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dropdown = btn.nextElementSibling;
+                
+                // close all other dropdowns
+                container.querySelectorAll('.menu-dropdown').forEach(d => {
+                    if (d !== dropdown) d.classList.add('hidden');
+                });
+                
+                // toggle this dropdown
+                dropdown.classList.toggle('hidden');
+            });
+        });
+        
+        // bind delete button events
+        container.querySelectorAll('.delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const conversationId = btn.dataset.conversationId;
+                this.deleteConversation(conversationId);
+            });
+        });
+        
+        // close dropdowns when clicking outside
+        document.addEventListener('click', () => {
+            container.querySelectorAll('.menu-dropdown').forEach(dropdown => {
+                dropdown.classList.add('hidden');
+            });
+        });
+    }
+    
+    async deleteConversation(conversationId) {
+        try {
+            const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+            const headers = {};
+            if (csrfToken) {
+                headers['X-CSRFToken'] = csrfToken.value;
+            }
+            
+            const response = await fetch(`/api/conversations/${conversationId}/`, {
+                method: 'DELETE',
+                headers: headers
+            });
+            
+            if (!response.ok) {
+                console.error('HTTP error:', response.status, response.statusText);
+                if (response.status === 404) {
+                    // conversation already deleted, just remove from UI
+                    console.log('Conversation not found, removing from UI');
+                } else {
+                    alert('Failed to delete conversation. Please try again.');
+                    return;
+                }
+            }
+            
+            // remove from local array
+            this.conversations = this.conversations.filter(c => c.id != conversationId);
+            this.renderConversationList();
+            
+            // if this was the current conversation, clear the chat
+            if (this.currentConversationId == conversationId) {
+                this.currentConversationId = null;
+                if (this.websocket) {
+                    this.websocket.close();
+                    this.websocket = null;
+                }
+                
+                // disable input and show welcome message
+                document.getElementById('message-input').disabled = true;
+                document.getElementById('send-btn').disabled = true;
+                document.getElementById('welcome-message').style.display = 'block';
+                document.getElementById('messages-container').innerHTML = '';
+                document.getElementById('messages-container').appendChild(document.getElementById('welcome-message'));
+            }
+            
+        } catch (error) {
+            console.error('Failed to delete conversation:', error);
+            // still remove from UI since the operation was attempted
+            this.conversations = this.conversations.filter(c => c.id != conversationId);
+            this.renderConversationList();
+            
+            if (this.currentConversationId == conversationId) {
+                this.currentConversationId = null;
+                if (this.websocket) {
+                    this.websocket.close();
+                    this.websocket = null;
+                }
+                document.getElementById('message-input').disabled = true;
+                document.getElementById('send-btn').disabled = true;
+                document.getElementById('welcome-message').style.display = 'block';
+                document.getElementById('messages-container').innerHTML = '';
+                document.getElementById('messages-container').appendChild(document.getElementById('welcome-message'));
+            }
+        }
+    }
+    
+    async createNewConversation() {
+        const conversation = await this.createNewConversationInternal();
+        if (conversation) {
+            this.selectConversation(conversation.id);
+        }
+    }
+    
+    async selectConversation(conversationId) {
+        this.currentConversationId = conversationId;
+        this.renderConversationList(); // update selection
+        
+        // close existing websocket
+        if (this.websocket) {
+            this.websocket.close();
+        }
+        
+        // load messages
+        await this.loadMessages(conversationId);
+        
+        // connect websocket
+        this.connectWebSocket(conversationId);
+        
+        // enable input
+        document.getElementById('message-input').disabled = false;
+        document.getElementById('send-btn').disabled = false;
+        
+        // hide welcome message
+        document.getElementById('welcome-message').style.display = 'none';
+    }
+    
+    async loadMessages(conversationId) {
+        try {
+            const response = await fetch(`/api/conversations/${conversationId}/messages/`);
+            const messages = await response.json();
+            this.renderMessages(messages.results || messages);
+        } catch (error) {
+            console.error('Failed to load messages:', error);
+        }
+    }
+    
+    renderMessages(messages) {
+        const container = document.getElementById('messages-container');
+        
+        container.innerHTML = messages.map(msg => `
+            <div class="flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
+                <div class="${msg.role === 'user' ? 'bg-primary text-white' : 'bg-gray-100'} px-4 py-2 rounded-lg max-w-2xl">
+                    ${msg.role === 'assistant' ? '<div class="flex items-center mb-2"><span class="text-sm font-medium text-gray-600">bal.ai</span></div>' : ''}
+                    <p class="whitespace-pre-line">${msg.content}</p>
+                    <p class="text-xs ${msg.role === 'user' ? 'text-blue-100' : 'text-gray-500'} mt-1">${this.formatDate(msg.timestamp)}</p>
+                </div>
+            </div>
+        `).join('');
+        
+        // scroll to bottom
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    connectWebSocket(conversationId) {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/chat/${conversationId}/`;
+        
+        this.websocket = new WebSocket(wsUrl);
+        
+        this.websocket.onopen = () => {
+            console.log('WebSocket connected for conversation:', conversationId);
+            document.getElementById('connection-status').textContent = '● Connected';
+            document.getElementById('connection-status').className = 'text-sm text-green-500';
+        };
+        
+        this.websocket.onclose = () => {
+            document.getElementById('connection-status').textContent = '● Disconnected';
+            document.getElementById('connection-status').className = 'text-sm text-red-500';
+            this.hideLoadingIndicator();
+        };
+        
+        this.websocket.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            // only show assistant messages via websocket, user messages are shown immediately
+            if (data.role === 'assistant') {
+                this.hideLoadingIndicator();
+                this.addMessage(data, true); // true = scroll to top of message
+            } else if (data.error) {
+                // handle error responses
+                this.hideLoadingIndicator();
+                this.addMessage({
+                    role: 'assistant',
+                    message: data.message || 'Sorry, I encountered an error. Please try again.'
+                }, true);
+            }
+        };
+        
+        this.websocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            this.hideLoadingIndicator();
+        };
+    }
+    
+    sendMessage() {
+        const input = document.getElementById('message-input');
+        const message = input.value.trim();
+        
+        if (!message || !this.websocket) return;
+        
+        // immediately show user message in UI
+        this.addMessage({
+            role: 'user',
+            message: message
+        });
+        
+        // show loading indicator
+        this.showLoadingIndicator();
+        
+        this.websocket.send(JSON.stringify({
+            message: message
+        }));
+        
+        input.value = '';
+    }
+    
+    addMessage(messageData, scrollToTop = false) {
+        const container = document.getElementById('messages-container');
+        
+        const messageHtml = `
+            <div class="flex ${messageData.role === 'user' ? 'justify-end' : 'justify-start'}">
+                <div class="${messageData.role === 'user' ? 'bg-primary text-white' : 'bg-gray-100'} px-4 py-2 rounded-lg max-w-2xl">
+                    ${messageData.role === 'assistant' ? '<div class="flex items-center mb-2"><span class="text-sm font-medium text-gray-600">bal.ai</span></div>' : ''}
+                    <p class="whitespace-pre-line">${messageData.message}</p>
+                    <p class="text-xs ${messageData.role === 'user' ? 'text-blue-100' : 'text-gray-500'} mt-1">just now</p>
+                </div>
+            </div>
+        `;
+        
+        container.insertAdjacentHTML('beforeend', messageHtml);
+        
+        if (scrollToTop && messageData.role === 'assistant') {
+            // scroll to the top of the new assistant message
+            const messages = container.querySelectorAll('.flex');
+            const newMessage = messages[messages.length - 1];
+            newMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+            // normal scroll to bottom for user messages
+            container.scrollTop = container.scrollHeight;
+        }
+    }
+    
+    showLoadingIndicator() {
+        // remove any existing loading indicator
+        this.hideLoadingIndicator();
+        
+        const container = document.getElementById('messages-container');
+        const loadingHtml = `
+            <div id="loading-indicator" class="flex justify-start">
+                <div class="bg-gray-100 px-4 py-3 rounded-lg max-w-2xl">
+                    <div class="flex items-center mb-2">
+                        <span class="text-sm font-medium text-gray-600">bal.ai</span>
+                    </div>
+                    <div class="flex space-x-1">
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.insertAdjacentHTML('beforeend', loadingHtml);
+        container.scrollTop = container.scrollHeight;
+    }
+    
+    hideLoadingIndicator() {
+        const loadingIndicator = document.getElementById('loading-indicator');
+        if (loadingIndicator) {
+            loadingIndicator.remove();
+        }
+    }
+    
+    formatDate(dateString) {
+        const date = new Date(dateString);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        
+        if (diffHours < 1) return 'just now';
+        if (diffHours < 24) return `${diffHours}h ago`;
+        return date.toLocaleDateString();
+    }
+}
+
+// initialize app when page loads
+document.addEventListener('DOMContentLoaded', () => {
+    new ChatApp();
+});
+</script>
+{% endblock %}

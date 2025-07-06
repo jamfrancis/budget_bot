@@ -1,0 +1,168 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - Balai{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <div class="text-right">
+            <p class="text-sm text-gray-500">Total Balance</p>
+            <p class="text-2xl font-bold text-primary">${{ total_balance|floatformat:2 }}</p>
+        </div>
+    </div>
+    
+    <!-- Add Account Section -->
+    <div class="bg-white shadow-md rounded-lg p-6">
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">Add New Account</h2>
+        
+        <!-- Plaid Integration Button -->
+        <div class="mb-6">
+            <button id="plaid-link-btn" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+                🏦 Connect Bank Account with Plaid
+            </button>
+            <p class="text-sm text-gray-500 mt-2">Securely connect your bank account to automatically sync transactions</p>
+        </div>
+        
+        <!-- Manual Add Account -->
+        <div class="border-t pt-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-3">Or Add Manually</h3>
+            <form method="post" action="{% url 'add_account' %}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {% csrf_token %}
+                <input type="text" name="name" placeholder="Account name (e.g., Chase Checking)" 
+                       class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                <select name="account_type" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    <option value="">Select Type</option>
+                    <option value="checking">Checking</option>
+                    <option value="savings">Savings</option>
+                    <option value="credit">Credit Card</option>
+                    <option value="investment">Investment</option>
+                    <option value="loan">Loan</option>
+                    <option value="other">Other</option>
+                </select>
+                <input type="number" name="balance" placeholder="0.00" step="0.01"
+                       class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary">
+                <button type="submit" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700">
+                    Add Manually
+                </button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Accounts Section -->
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="px-6 py-4 bg-gray-50 border-b">
+            <h2 class="text-xl font-semibold text-gray-900">Your Accounts</h2>
+        </div>
+        <div class="divide-y">
+            {% for account in accounts %}
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <h3 class="font-medium text-gray-900">{{ account.name }}</h3>
+                            {% if account.account_type == 'credit' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                                    Credit Card
+                                </span>
+                            {% elif account.account_type == 'checking' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    Checking
+                                </span>
+                            {% elif account.account_type == 'savings' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Savings
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                    {{ account.get_account_type_display }}
+                                </span>
+                            {% endif %}
+                            {% if account.is_plaid_connected %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    🏦 Connected
+                                </span>
+                            {% endif %}
+                        </div>
+                        <p class="text-sm text-gray-500">Created {{ account.created_at|date:"M d, Y" }}</p>
+                    </div>
+                    <div class="text-right">
+                        {% if account.account_type == 'credit' %}
+                            <p class="font-semibold {% if account.balance > 0 %}text-red-600{% else %}text-gray-900{% endif %}">
+                                {% if account.balance > 0 %}${{ account.balance|floatformat:2 }} owed{% else %}$0.00 balance{% endif %}
+                            </p>
+                        {% else %}
+                            <p class="font-semibold {% if account.balance < 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                                ${{ account.balance|floatformat:2 }}
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-center">
+                    <p class="text-gray-500">No accounts yet. Add your first account above!</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Add Transaction Section -->
+    {% if accounts %}
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Add Transaction</h2>
+            <form method="post" action="{% url 'add_transaction' %}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {% csrf_token %}
+                <select name="account" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    <option value="">Select Account</option>
+                    {% for account in accounts %}
+                        <option value="{{ account.id }}">{{ account.name }}</option>
+                    {% endfor %}
+                </select>
+                <input type="number" name="amount" placeholder="Amount (+ or -)" step="0.01"
+                       class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                <input type="text" name="description" placeholder="Description"
+                       class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
+                    Add Transaction
+                </button>
+            </form>
+        </div>
+    {% endif %}
+    
+    <!-- Recent Transactions Section -->
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="px-6 py-4 bg-gray-50 border-b">
+            <h2 class="text-xl font-semibold text-gray-900">Recent Transactions</h2>
+        </div>
+        <div class="divide-y">
+            {% for transaction in recent_transactions %}
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-medium text-gray-900">{{ transaction.description }}</h3>
+                        <p class="text-sm text-gray-500">
+                            {{ transaction.date }} • {{ transaction.account.name }}
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-semibold {% if transaction.amount < 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                            {% if transaction.amount > 0 %}+{% endif %}${{ transaction.amount|floatformat:2 }}
+                        </p>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-center">
+                    <p class="text-gray-500">No transactions yet.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Quick Chat Link -->
+    <div class="bg-primary text-white p-6 rounded-lg">
+        <h3 class="text-lg font-semibold mb-2">💬 Have questions about your finances?</h3>
+        <p class="text-blue-100 mb-4">Ask our AI assistant for personalized advice and insights.</p>
+        <a href="{% url 'home' %}" class="bg-white text-primary px-4 py-2 rounded-md font-medium hover:bg-gray-100 transition-colors">
+            Go to Chat
+        </a>
+    </div>
+</div>
+{% endblock %}\n\n{% block extra_js %}\n<script src=\"https://cdn.plaid.com/link/v2/stable/link-initialize.js\"></script>\n<script>\ndocument.addEventListener('DOMContentLoaded', function() {\n    const plaidBtn = document.getElementById('plaid-link-btn');\n    if (plaidBtn) {\n        plaidBtn.addEventListener('click', function() {\n            fetch('{% url \"plaid_create_link_token\" %}', {\n                method: 'POST',\n                headers: {\n                    'Content-Type': 'application/json',\n                    'X-CSRFToken': '{{ csrf_token }}'\n                }\n            })\n            .then(response => response.json())\n            .then(data => {\n                if (data.link_token) {\n                    const handler = Plaid.create({\n                        token: data.link_token,\n                        onSuccess: (public_token, metadata) => {\n                            fetch('{% url \"plaid_exchange_token\" %}', {\n                                method: 'POST',\n                                headers: {\n                                    'Content-Type': 'application/json',\n                                    'X-CSRFToken': '{{ csrf_token }}'\n                                },\n                                body: JSON.stringify({\n                                    public_token: public_token\n                                })\n                            })\n                            .then(response => response.json())\n                            .then(data => {\n                                if (data.success) {\n                                    alert('Bank account connected successfully!');\n                                    window.location.reload();\n                                } else {\n                                    alert('Error: ' + data.error);\n                                }\n                            });\n                        }\n                    });\n                    handler.open();\n                } else {\n                    alert('Error: ' + data.error);\n                }\n            });\n        });\n    }\n});\n</script>\n{% endblock %}

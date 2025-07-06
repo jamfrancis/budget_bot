@@ -1,0 +1,414 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - Balai{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <div class="text-right">
+            <p class="text-sm text-gray-500">Total Balance</p>
+            <p class="text-2xl font-bold text-primary">${{ total_balance|floatformat:2 }}</p>
+        </div>
+    </div>
+    
+    <!-- Add Account Section -->
+    <div class="bg-white shadow-md rounded-lg p-6">
+        <h2 class="text-xl font-semibold text-gray-900 mb-4">Add New Account</h2>
+        
+        <!-- Plaid Integration Button -->
+        <div class="mb-6">
+            <button id="plaid-link-btn" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors">
+                Add Account
+            </button>
+            <p class="text-sm text-gray-500 mt-2">Securely connect your bank account to automatically sync transactions</p>
+        </div>
+        
+        <!-- Manual Add Account (Collapsible) -->
+        <div class="border-t pt-6">
+            <button id="toggle-manual-account" class="flex items-center justify-between w-full text-left">
+                <h3 class="text-lg font-medium text-gray-900">Add Manually</h3>
+                <span class="text-gray-500">▼</span>
+            </button>
+            <div id="manual-account-form" class="hidden mt-3">
+                <form method="post" action="{% url 'add_account' %}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {% csrf_token %}
+                    <input type="text" name="name" placeholder="Account name (e.g., Chase Checking)" 
+                           class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    <select name="account_type" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                        <option value="">Select Type</option>
+                        <option value="checking">Checking</option>
+                        <option value="savings">Savings</option>
+                        <option value="credit">Credit Card</option>
+                        <option value="investment">Investment</option>
+                        <option value="loan">Loan</option>
+                        <option value="other">Other</option>
+                    </select>
+                    <input type="number" name="balance" placeholder="0.00" step="0.01"
+                           class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary">
+                    <button type="submit" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700">
+                        Add Manually
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Accounts Section -->
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold text-gray-900">Your Accounts</h2>
+            <button id="edit-accounts-btn" class="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">
+                Edit Accounts
+            </button>
+        </div>
+        <div class="divide-y">
+            {% for account in accounts %}
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" class="account-checkbox hidden" value="{{ account.id }}">
+                            <h3 class="font-medium text-gray-900">{{ account.name }}</h3>
+                            {% if account.account_type == 'credit' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                                    Credit Card
+                                </span>
+                            {% elif account.account_type == 'checking' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    Checking
+                                </span>
+                            {% elif account.account_type == 'savings' %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                    Savings
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                    {{ account.get_account_type_display }}
+                                </span>
+                            {% endif %}
+                            {% if not account.is_plaid_connected %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                    Not Syncing
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="text-right flex items-center space-x-2">
+                        {% if not account.is_plaid_connected %}
+                            <button onclick="editAccount({{ account.id }}, '{{ account.name }}', '{{ account.account_type }}', '{{ account.balance }}')" 
+                                    class="edit-account-btn text-xs text-blue-600 hover:text-blue-800">Edit</button>
+                        {% endif %}
+                        {% if account.account_type == 'credit' or account.account_type == 'loan' %}
+                            <p class="font-semibold text-red-600">
+                                -${{ account.balance|floatformat:2 }}
+                            </p>
+                        {% else %}
+                            <p class="font-semibold {% if account.balance < 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                                ${{ account.balance|floatformat:2 }}
+                            </p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-center">
+                    <p class="text-gray-500">No accounts yet. Add your first account above!</p>
+                </div>
+            {% endfor %}
+        </div>
+        <!-- Delete Selected Button (hidden by default) -->
+        <div id="delete-section" class="px-6 py-4 border-t bg-red-50 hidden">
+            <button id="delete-selected-btn" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                Delete Selected Accounts
+            </button>
+        </div>
+    </div>
+    
+    <!-- Add Transaction Section -->
+    {% if accounts %}
+        <div class="bg-white shadow-md rounded-lg p-6">
+            <button id="toggle-add-transaction" class="flex items-center justify-between w-full text-left">
+                <h2 class="text-xl font-semibold text-gray-900">Add Transaction</h2>
+                <span class="text-gray-500">▼</span>
+            </button>
+            <div id="add-transaction-form" class="hidden mt-4">
+                <form method="post" action="{% url 'add_transaction' %}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {% csrf_token %}
+                    <select name="account" class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                        <option value="">Select Account</option>
+                        {% for account in accounts %}
+                            <option value="{{ account.id }}">{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <input type="number" name="amount" placeholder="Amount (+ or -)" step="0.01"
+                           class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    <input type="text" name="description" placeholder="Description"
+                           class="px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700">
+                        Add Transaction
+                    </button>
+                </form>
+            </div>
+        </div>
+    {% endif %}
+    
+    <!-- Recent Transactions Section -->
+    <div class="bg-white shadow-md rounded-lg overflow-hidden">
+        <div class="px-6 py-4 bg-gray-50 border-b flex justify-between items-center">
+            <h2 class="text-xl font-semibold text-gray-900">Recent Transactions</h2>
+            <button id="sync-transactions-btn" class="text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700">
+                Sync Transactions
+            </button>
+        </div>
+        <div class="divide-y">
+            {% for transaction in recent_transactions %}
+                <div class="px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-medium text-gray-900">{{ transaction.description }}</h3>
+                        <p class="text-sm text-gray-500">
+                            {{ transaction.date }} • {{ transaction.account.name }}
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <p class="font-semibold text-red-600">
+                            -${% if transaction.amount < 0 %}{{ transaction.amount|floatformat:2|slice:"1:" }}{% else %}{{ transaction.amount|floatformat:2 }}{% endif %}
+                        </p>
+                    </div>
+                </div>
+            {% empty %}
+                <div class="px-6 py-8 text-center">
+                    <p class="text-gray-500">No transactions yet.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+</div>
+
+<!-- Edit Account Modal -->
+<div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+    <div class="flex items-center justify-center min-h-screen p-4">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 class="text-lg font-semibold mb-4">Edit Account</h3>
+            <form id="editForm" method="post" action="{% url 'edit_account' %}">
+                {% csrf_token %}
+                <input type="hidden" id="editAccountId" name="account_id">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Account Name</label>
+                        <input type="text" id="editName" name="name" 
+                               class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Account Type</label>
+                        <select id="editType" name="account_type" 
+                                class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                            <option value="checking">Checking</option>
+                            <option value="savings">Savings</option>
+                            <option value="credit">Credit Card</option>
+                            <option value="investment">Investment</option>
+                            <option value="loan">Loan</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Balance</label>
+                        <input type="number" id="editBalance" name="balance" step="0.01"
+                               class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary" required>
+                    </div>
+                </div>
+                <div class="flex space-x-3 mt-6">
+                    <button type="submit" class="flex-1 bg-primary text-white px-4 py-2 rounded-md hover:bg-secondary">
+                        Save Changes
+                    </button>
+                    <button type="button" onclick="closeEditModal()" class="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const plaidBtn = document.getElementById('plaid-link-btn');
+    if (plaidBtn) {
+        plaidBtn.addEventListener('click', function() {
+            fetch('{% url "plaid_create_link_token" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.link_token) {
+                    const handler = Plaid.create({
+                        token: data.link_token,
+                        onSuccess: (public_token, metadata) => {
+                            fetch('{% url "plaid_exchange_token" %}', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': '{{ csrf_token }}'
+                                },
+                                body: JSON.stringify({
+                                    public_token: public_token
+                                })
+                            })
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert('Bank account connected successfully!');
+                                    window.location.reload();
+                                } else {
+                                    alert('Error: ' + data.error);
+                                }
+                            });
+                        }
+                    });
+                    handler.open();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+        });
+    }
+});
+
+// edit account modal functions
+function editAccount(id, name, type, balance) {
+    document.getElementById('editAccountId').value = id;
+    document.getElementById('editName').value = name;
+    document.getElementById('editType').value = type;
+    document.getElementById('editBalance').value = balance;
+    document.getElementById('editModal').classList.remove('hidden');
+}
+
+function closeEditModal() {
+    document.getElementById('editModal').classList.add('hidden');
+}
+
+// edit accounts button functionality
+let editMode = false;
+document.getElementById('edit-accounts-btn').addEventListener('click', function() {
+    editMode = !editMode;
+    const checkboxes = document.querySelectorAll('.account-checkbox');
+    const editButtons = document.querySelectorAll('.edit-account-btn');
+    const deleteSection = document.getElementById('delete-section');
+    
+    if (editMode) {
+        this.textContent = '✓ Done Editing';
+        this.className = 'text-sm bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700';
+        checkboxes.forEach(cb => cb.classList.remove('hidden'));
+        editButtons.forEach(btn => btn.classList.add('hidden'));
+        deleteSection.classList.remove('hidden');
+    } else {
+        this.textContent = '✏️ Edit Accounts';
+        this.className = 'text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700';
+        checkboxes.forEach(cb => {
+            cb.classList.add('hidden');
+            cb.checked = false;
+        });
+        editButtons.forEach(btn => btn.classList.remove('hidden'));
+        deleteSection.classList.add('hidden');
+    }
+});
+
+// delete selected accounts
+document.getElementById('delete-selected-btn').addEventListener('click', function() {
+    const selectedAccounts = document.querySelectorAll('.account-checkbox:checked');
+    if (selectedAccounts.length === 0) {
+        alert('Please select accounts to delete.');
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete ${selectedAccounts.length} account(s)? This action cannot be undone.`)) {
+        const accountIds = Array.from(selectedAccounts).map(cb => cb.value);
+        
+        fetch('{% url "delete_accounts" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({account_ids: accountIds})
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`Deleted ${data.deleted_count} account(s)!`);
+                window.location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error);
+        });
+    }
+});
+
+// sync transactions button
+document.getElementById('sync-transactions-btn').addEventListener('click', function() {
+    this.textContent = '🔄 Syncing...';
+    this.disabled = true;
+    
+    fetch('{% url "plaid_sync_transactions" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Synced ${data.synced_count} transactions!`);
+            window.location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    })
+    .finally(() => {
+        this.textContent = '🔄 Sync Transactions';
+        this.disabled = false;
+    });
+});
+
+// toggle manual account form
+document.getElementById('toggle-manual-account').addEventListener('click', function() {
+    const form = document.getElementById('manual-account-form');
+    const arrow = this.querySelector('span');
+    
+    if (form.classList.contains('hidden')) {
+        form.classList.remove('hidden');
+        arrow.textContent = '▲';
+    } else {
+        form.classList.add('hidden');
+        arrow.textContent = '▼';
+    }
+});
+
+// toggle add transaction form
+document.getElementById('toggle-add-transaction').addEventListener('click', function() {
+    const form = document.getElementById('add-transaction-form');
+    const arrow = this.querySelector('span');
+    
+    if (form.classList.contains('hidden')) {
+        form.classList.remove('hidden');
+        arrow.textContent = '▲';
+    } else {
+        form.classList.add('hidden');
+        arrow.textContent = '▼';
+    }
+});
+</script>
+{% endblock %}

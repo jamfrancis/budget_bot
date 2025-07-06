@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}bal.ai - AI Financial Assistant{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="bg-white shadow-md rounded-lg">
+        <div class="px-6 py-4 bg-primary text-white rounded-t-lg">
+            <h1 class="text-2xl font-bold">Financial Chat Assistant</h1>
+            <p class="text-blue-100">Ask me anything about your finances</p>
+        </div>
+        
+        <div class="p-6">
+            <!-- Current Conversation -->
+            {% if question and response %}
+                <div class="space-y-4 mb-8">
+                    <!-- User Message -->
+                    <div class="flex justify-end">
+                        <div class="bg-primary text-white px-4 py-2 rounded-lg max-w-md">
+                            <p>{{ question }}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- AI Response -->
+                    <div class="flex justify-start">
+                        <div class="bg-gray-100 px-4 py-2 rounded-lg max-w-2xl">
+                            <div class="flex items-center mb-2">
+                                <span class="text-sm font-medium text-gray-600">bal.ai</span>
+                            </div>
+                            <p class="whitespace-pre-line">{{ response }}</p>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+            
+            <!-- Chat History -->
+            {% if chat_history %}
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Recent Conversations</h3>
+                    <div class="space-y-2">
+                        {% for chat in chat_history %}
+                            <div class="bg-gray-50 p-3 rounded-lg">
+                                <p class="text-sm font-medium text-gray-900">Q: {{ chat.question|truncatechars:80 }}</p>
+                                <p class="text-xs text-gray-600 mt-1">{{ chat.created_at|timesince }} ago</p>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+            
+            <!-- Welcome Message -->
+            {% if not question and not chat_history %}
+                <div class="text-center py-8 mb-8">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-2">Welcome to your Financial Assistant</h2>
+                    <p class="text-gray-600 mb-4">Ask me questions about your finances and I'll provide personalized advice.</p>
+                    
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left max-w-md mx-auto">
+                        <p class="font-medium text-blue-900 mb-2">Example questions:</p>
+                        <ul class="text-sm text-blue-800 space-y-1">
+                            <li>"Can I afford a $500 vacation?"</li>
+                            <li>"How much should I save monthly?"</li>
+                            <li>"What's my current spending pattern?"</li>
+                            <li>"Should I pay off debt or save more?"</li>
+                        </ul>
+                    </div>
+                </div>
+            {% endif %}
+            
+            <!-- Chat Input Form -->
+            <form method="post" class="border-t pt-6">
+                {% csrf_token %}
+                <div class="flex space-x-4">
+                    <div class="flex-1">
+                        {{ form.message }}
+                    </div>
+                    <button type="submit" class="bg-primary text-white px-6 py-3 rounded-lg font-medium hover:bg-secondary transition-colors">
+                        Send
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
